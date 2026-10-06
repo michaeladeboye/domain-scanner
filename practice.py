@@ -32,16 +32,15 @@ def productlist(yurr):
     return prlist
 
 def cheapest(products):
+    cheapie = products[0]
     for p in products:
-        cheapest = p[1]
-        if p[1] < cheapest:
-            cheapest = [p[1]]
-            #print (cheapest)
-        return cheapest
+        if p["price"] < cheapie['price']:
+            cheapie = p
+    return cheapie["name"]
 
 yurr =[("Jersey",180,True),("Shorts",50,True),("Joggers",90, True),("Jordans",230, True)]
 items = productlist(yurr)
-print(cheapest(yurr))
+print(cheapest(items))
     
 
 
