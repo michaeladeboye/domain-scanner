@@ -1,5 +1,9 @@
+import argparse
+import csv
+import json
 import socket
 import ssl
+import sys
 from datetime import datetime, timezone
 
 import requests
@@ -15,7 +19,7 @@ def check_hsts(header):
             if part.startswith("max-age"):
                 x = int(part.split("=")[1])
                 if x < 31536000:
-                    return ("HSTS", "WARN", "max-age is one year or less")
+                    return ("HSTS", "WARN", "max-age is less than one year")
                 else:
                     return ("HSTS", "PASS", "max-age is one year or more")
         return ("HSTS", "FAIL", "max-age is not present")
@@ -35,7 +39,7 @@ def check_CSP(header):
 def check_XFRAME(header):
     if header is None:
         return ("XFO", "FAIL", "header missing")
-    elif header in ("deny", "sameorigin", "DENY", "SAMEORIGIN"):
+    elif header.upper() in ("deny", "sameorigin"):
         return ("XFO", "PASS", "valid header")
     else:
         return ("XFO", "FAIL", "wrong header")
@@ -70,61 +74,99 @@ def table(rlist):
         )
 
 
-with open("domains.txt", encoding="utf-8") as file:
-    domains = []
-    for line in file:
-        if not line.strip():
-            continue
-        domains.append(line.strip())
-
-results = []
-for d in domains:
-    hsts = ("HSTS", "ERROR", "could not fetch page")
-    csp = ("CSP", "ERROR", "could not fetch page")
-    xfo = ("XFO", "ERROR", "could not fetch page")
-    ccert = ("TLS Cert", "ERROR", "not_checked")
-    try:
-        response = requests.get(f"https://{d}", timeout=15)
-    except requests.exceptions.Timeout:
-        hsts = ("HSTS", "ERROR", "timed out")
-        csp = ("CSP", "ERROR", "timed out")
-        xfo = ("XFO", "ERROR", "timed out")
-        print(f"{d}: timed out ")
-    except Exception as error:
-        hsts = ("HSTS", "ERROR", str(type(error).__name__))
-        csp = ("CSP", "ERROR", str(type(error).__name__))
-        xfo = ("XFO", "ERROR", str(type(error).__name__))
-    else:
-        hsts = check_hsts(response.headers.get("Strict-Transport-Security"))
-
-        csp = check_CSP(response.headers.get("Content-Security-Policy"))
-
-        xfo = check_XFRAME(response.headers.get("X-Frame-Options"))
-
-    try:
-        cdl = cert_days_left(d)
-    except ssl.SSLCertVerificationError as error:
-        ccert = ("TLS Cert", "FAIL", str(error.verify_message))
-    except Exception as error:
-        ccert = ("TLS Cert", "ERROR", str(type(error).__name__))
-    else:
-        cert, status4, reason4 = certgrade(cdl)
-        ccert = (cert, status4, reason4)
-
-    results.append(
-        {
-            "domain": d,
-            "hsts": (hsts),
-            "csp": (csp),
-            "xfo": (xfo),
-            "cert": (ccert),
-        }
+def main():
+    parser = argparse.ArgumentParser(
+        description="Scan domains for security headers and TLS certificate expiry."
     )
+    parser.add_argument("file", help="File of domains to scan")
+    parser.add_argument("--json", help="Exports results to json")
+    parser.add_argument("--csv", help="Exports results to csv")
+    args = parser.parse_args()
 
-table(results)
-print("\n\nIssues:")
-for r in results:
-    warnings = [r["hsts"], r["csp"], r["xfo"], r["cert"]]
-    for w in warnings:
-        if "PASS" not in w[1]:
-            print(f"{r['domain']}  {w[0]}  {w[1]}  {w[2]}")
+    with open(args.file, encoding="utf-8") as file:
+        domains = []
+        for line in file:
+            if not line.strip():
+                continue
+            domains.append(line.strip())
+
+    results = []
+    for d in domains:
+        hsts = ("HSTS", "ERROR", "could not fetch page")
+        csp = ("CSP", "ERROR", "could not fetch page")
+        xfo = ("XFO", "ERROR", "could not fetch page")
+        ccert = ("TLS Cert", "ERROR", "not_checked")
+        try:
+            response = requests.get(f"https://{d}", timeout=15)
+        except requests.exceptions.Timeout:
+            hsts = ("HSTS", "ERROR", "timed out")
+            csp = ("CSP", "ERROR", "timed out")
+            xfo = ("XFO", "ERROR", "timed out")
+            print(f"{d}: timed out ")
+        except Exception as error:
+            hsts = ("HSTS", "ERROR", str(type(error).__name__))
+            csp = ("CSP", "ERROR", str(type(error).__name__))
+            xfo = ("XFO", "ERROR", str(type(error).__name__))
+        else:
+            hsts = check_hsts(response.headers.get("Strict-Transport-Security"))
+
+            csp = check_CSP(response.headers.get("Content-Security-Policy"))
+
+            xfo = check_XFRAME(response.headers.get("X-Frame-Options"))
+
+        try:
+            cdl = cert_days_left(d)
+        except ssl.SSLCertVerificationError as error:
+            ccert = ("TLS Cert", "FAIL", str(error.verify_message))
+        except Exception as error:
+            ccert = ("TLS Cert", "ERROR", str(type(error).__name__))
+        else:
+            cert, status4, reason4 = certgrade(cdl)
+            ccert = certgrade(cdl)
+
+        results.append(
+            {
+                "domain": d,
+                "hsts": (hsts),
+                "csp": (csp),
+                "xfo": (xfo),
+                "cert": (ccert),
+            }
+        )
+
+    table(results)
+    found_problem = False
+    print("\n\nIssues:")
+    for r in results:
+        warnings = [r["hsts"], r["csp"], r["xfo"], r["cert"]]
+        for w in warnings:
+            if "PASS" not in w[1]:
+                print(f"{r['domain']}  {w[0]}  {w[1]}  {w[2]}")
+            if (w[1]) in ("FAIL", "ERROR"):
+                found_problem = True
+
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2)
+
+    if args.csv:
+        with open(args.csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["domain", "check", "status", "reason"])
+            for dicts in results:
+                findings = [dicts["hsts"], dicts["csp"], dicts["xfo"], dicts["cert"]]
+                for finding in findings:
+                    writer.writerow(
+                        [
+                            dicts["domain"],
+                            finding[0],
+                            finding[1],
+                            finding[2],
+                        ]
+                    )
+    if found_problem:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
