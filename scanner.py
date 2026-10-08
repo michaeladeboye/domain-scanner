@@ -2,6 +2,8 @@ import socket
 import ssl
 from datetime import datetime, timezone
 
+import requests
+
 
 def check_hsts(header):
     if header is None:
@@ -16,10 +18,11 @@ def check_hsts(header):
                     return ("HSTS", "WARN", "max-age is one year or less")
                 else:
                     return ("HSTS", "PASS", "max-age is one year or more")
+        return ("HSTS", "FAIL", "max-age is not present")
 
 
 def check_CSP(header):
-    if header == None:
+    if header is None:
         return ("CSP", "FAIL", "CSP is not present")
     elif "unsafe-inline" in header:
         return ("CSP", "WARN", "allows unsafe-inline")
@@ -30,7 +33,7 @@ def check_CSP(header):
 
 
 def check_XFRAME(header):
-    if header == None:
+    if header is None:
         return ("XFO", "FAIL", "header missing")
     elif header in ("deny", "sameorigin", "DENY", "SAMEORIGIN"):
         return ("XFO", "PASS", "valid header")
@@ -49,14 +52,22 @@ def cert_days_left(host, port=443):
     return (exp - datetime.now(timezone.utc)).days
 
 
-def certgrade(days):
-    # cert_days_left("github.com")
-    if days <= 7:
+def certgrade(tls):
+    if tls <= 7:
         return ("TLS Cert", "FAIL", "under 7 days left")
-    elif days <= 30:
+    elif tls <= 30:
         return ("TLS Cert", "WARN", "under 30 days left")
     else:
-        return ("TLS Cert", "PASS", "")
+        return ("TLS Cert", "PASS", f"{tls} days left")
+
+
+def table(rlist):
+    print(f"{'DOMAIN':<25} {'HSTS':<6}   {'CSP':<6}  {'XFO':<6}  {'CERT':<6}")
+    print("-" * 60)
+    for b in rlist:
+        print(
+            f"{b['domain']:<25} {b['hsts'][1]:<6}   {b['csp'][1]:<6}  {b['xfo'][1]:<6}  {b['cert'][1]:<6}"
+        )
 
 
 with open("domains.txt", encoding="utf-8") as file:
@@ -64,45 +75,56 @@ with open("domains.txt", encoding="utf-8") as file:
     for line in file:
         if not line.strip():
             continue
-        print(line.strip())
         domains.append(line.strip())
 
-print(check_XFRAME(None))
-print(check_XFRAME("DENY"))
-print(check_XFRAME("SAMEORIGIN"))
-print(check_hsts("max-age=63072000; includeSubDomains"))
-print(check_hsts("max-age=300"))
-# for d in domains:
-#     try:
-#         response = requests.get(f"https://{d}", timeout=10)
-#         print(response.status_code)
-#     except TimeoutError:
-#         print(f"{d}: timed out ")
-#     except Exception as error:
-#         print(f"error: {type(error).__name__} {error}")
-#     else:
-#         for key, value in response.headers.items():
-#             print(f"{key}: {value}")
+results = []
+for d in domains:
+    hsts = ("HSTS", "ERROR", "could not fetch page")
+    csp = ("CSP", "ERROR", "could not fetch page")
+    xfo = ("XFO", "ERROR", "could not fetch page")
+    ccert = ("TLS Cert", "ERROR", "not_checked")
+    try:
+        response = requests.get(f"https://{d}", timeout=15)
+    except requests.exceptions.Timeout:
+        hsts = ("HSTS", "ERROR", "timed out")
+        csp = ("CSP", "ERROR", "timed out")
+        xfo = ("XFO", "ERROR", "timed out")
+        print(f"{d}: timed out ")
+    except Exception as error:
+        hsts = ("HSTS", "ERROR", str(type(error).__name__))
+        csp = ("CSP", "ERROR", str(type(error).__name__))
+        xfo = ("XFO", "ERROR", str(type(error).__name__))
+    else:
+        hsts = check_hsts(response.headers.get("Strict-Transport-Security"))
 
-#         header, status, reason = check_hsts(
-#             response.headers.get("Strict-Transport-Security")
-#         )
-#         print(header, status, reason)
+        csp = check_CSP(response.headers.get("Content-Security-Policy"))
 
-#         header2, status2, reason2 = check_CSP(
-#             response.headers.get("Content-Security-Policy")
-#         )
-#         print(header2, status2, reason2)
+        xfo = check_XFRAME(response.headers.get("X-Frame-Options"))
 
-#         header3, status3, reason3 = check_XFRAME(
-#             response.headers.get("X-Frame-Options")
-#         )
-#         print(header3, status3, reason3)
+    try:
+        cdl = cert_days_left(d)
+    except ssl.SSLCertVerificationError as error:
+        ccert = ("TLS Cert", "FAIL", str(error.verify_message))
+    except Exception as error:
+        ccert = ("TLS Cert", "ERROR", str(type(error).__name__))
+    else:
+        cert, status4, reason4 = certgrade(cdl)
+        ccert = (cert, status4, reason4)
 
-#         # try:
-#         cdl = cert_days_left(d)
-#         # except ssl.SSLCertVerificationError:
+    results.append(
+        {
+            "domain": d,
+            "hsts": (hsts),
+            "csp": (csp),
+            "xfo": (xfo),
+            "cert": (ccert),
+        }
+    )
 
-#         days, status4, reason4 = certgrade(cdl)
-#         print("Days until expiration:", cdl)
-#         print(days, status4, reason4)
+table(results)
+print("\n\nIssues:")
+for r in results:
+    warnings = [r["hsts"], r["csp"], r["xfo"], r["cert"]]
+    for w in warnings:
+        if "PASS" not in w[1]:
+            print(f"{r['domain']}  {w[0]}  {w[1]}  {w[2]}")
