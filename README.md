@@ -35,6 +35,12 @@ This tool is a domain security scanner. When given a list of domains, it checks 
 - I used this scanner on 4 production websites (3 client, 1 personal) and flagged 8 missing security headers (CSP and X-Frame-Options on every site). I was then able to repair all 8 to reduce cross-site scripting and clickjacking risk
 - The fixes were then confirmed by a re-scan
 
+## Limitations
+- It’s a passive configuration checker, not a vulnerability scanner.
+- It only checks the homepage, after redirects.
+- The CSP check is a simple text match, so it flags unsafe-inline even in style-src, where the risk is low.
+- It doesn’t count CSP’s frame-ancestors as an alternative to XFO.
+
 ## Installation
 
 Requires Python 3 (tested on 3.14).
