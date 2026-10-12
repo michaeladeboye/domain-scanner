@@ -39,7 +39,7 @@ def check_CSP(header):
 def check_XFRAME(header):
     if header is None:
         return ("XFO", "FAIL", "header missing")
-    elif header.upper() in ("deny", "sameorigin"):
+    elif header.upper() in ("DENY", "SAMEORIGIN"):
         return ("XFO", "PASS", "valid header")
     else:
         return ("XFO", "FAIL", "wrong header")
