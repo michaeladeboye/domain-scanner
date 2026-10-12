@@ -121,7 +121,6 @@ def main():
         except Exception as error:
             ccert = ("TLS Cert", "ERROR", str(type(error).__name__))
         else:
-            cert, status4, reason4 = certgrade(cdl)
             ccert = certgrade(cdl)
 
         results.append(
