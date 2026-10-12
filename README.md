@@ -59,6 +59,6 @@ Exit code is `0` if nothing FAILs or ERRORs and `1` otherwise, so the scanner
 can be used in scheduled jobs or CI pipelines.
 
 ## Example Output
-
+![Domain Scanner Output](domain-scanner-screenshot/domain-scanner-output.png)
 
 
