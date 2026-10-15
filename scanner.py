@@ -16,7 +16,7 @@ def check_hsts(header):
         parts = header.split(";")
         parts = [part.strip() for part in parts]
         for part in parts:
-            if part.startswith("max-age"):
+            if part.upper().startswith("MAX-AGE"):
                 x = int(part.split("=")[1])
                 if x < 31536000:
                     return ("HSTS", "WARN", "max-age is less than one year")
@@ -47,6 +47,7 @@ def check_XFRAME(header):
 
 def cert_days_left(host, port=443):
     ctx = ssl.create_default_context()
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     with socket.create_connection((host, port), timeout=10) as sock:
         with ctx.wrap_socket(sock, server_hostname=host) as ssock:
             cert = ssock.getpeercert()
@@ -118,6 +119,8 @@ def main():
             cdl = cert_days_left(d)
         except ssl.SSLCertVerificationError as error:
             ccert = ("TLS Cert", "FAIL", str(error.verify_message))
+        except ssl.SSLError as error:
+            ccert = ("TLS Cert", "FAIL", str(error.reason))
         except Exception as error:
             ccert = ("TLS Cert", "ERROR", str(type(error).__name__))
         else:
